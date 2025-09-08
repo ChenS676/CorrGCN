@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from visualize import save_adj, save_adj_binary, to01, binarize01
 
 # =========================
 # 基础组件
@@ -124,8 +124,8 @@ class gcn(nn.Module):
         return powers
 
     def forward(self, x, supports):
-        with torch.no_grad():
-            self.last_power_coef = self.power_coef.detach().cpu()
+        # with torch.no_grad():
+        #     self.last_power_coef = self.power_coef.detach().cpu()
 
         out = [x]
         for A in supports:
@@ -175,7 +175,9 @@ class MixPropDual(nn.Module):
         self.gates = nn.Parameter(torch.ones(K), requires_grad=True)
 
         self.r1 = nn.Parameter(torch.randn(1, r_dim), requires_grad=True)
-
+        self.adj_1 = None
+        self.adj_2 = None
+        
     @staticmethod
     def _apply_diag(A, mode):
         if mode == 'neighbor':
@@ -217,21 +219,21 @@ class MixPropDual(nn.Module):
         B, C, N, T = x.shape
         device = x.device
 
-        adj_1 = self._build_adj1_from_A(A_base)
-        adj_2 = self._build_adj2_from_r1(N, device)
+        self.adj_1 = self._build_adj1_from_A(A_base)
+        self.adj_2 = self._build_adj2_from_r1(N, device)
 
         inj = [self.k_convs[k](x) * self.gates[k] for k in range(self.K)]
 
         # 路一
         z = inj[0].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
         for k in range(1, self.K):
-            z = adj_1 @ z + inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
+            z = self.adj_1 @ z + inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
         z = z.view(B, T, N, -1).permute(0, 3, 2, 1).contiguous()
 
         # 路二
         z_fix = inj[0].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
         for k in range(1, self.K):
-            z_fix = adj_2 @ z_fix + inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
+            z_fix = self.adj_2 @ z_fix + inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
         z_fix = z_fix.view(B, T, N, -1).permute(0, 3, 2, 1).contiguous()
 
         return z + z_fix
@@ -297,7 +299,19 @@ class PowerMixDual(nn.Module):
 
         adj_1 = self._build_adj1_from_A(A_base)
         adj_2 = self._build_adj2_from_r1(N, device)
+        
+        # ---- 用法：替换你原来的可视化片段 ----
+        # 连续值（归一化到[0,1]）版本
+        # save_adj(adj_2, "adj_2.png") 
+        # save_adj(adj_1, "adj_1.png")
 
+        # 如需二值化（严格 0/1）
+        # save_adj_binary(adj_2, "adj_2_binary.png", thr=0.5, mode="absolute")
+        # save_adj_binary(adj_1, "adj_1_binary.png", thr=0.5, mode="absolute")
+        # 或者用分位数阈值：例如只保留 top 10% 的高权重边
+        # save_adj_binary(adj_2, "adj_2_top10p.png", thr=0.9, mode="percentile")
+        # save_adj_binary(adj_1, "adj_1_top10p.png", thr=0.9, mode="percentile")
+        
         inj = [self.k_convs[k](x) * self.gates[k] for k in range(self.K)]
 
         # 双图幂律递推

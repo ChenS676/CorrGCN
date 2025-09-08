@@ -17,42 +17,6 @@ import pandas as pd
 # === NEW: 需要用到的函数 ===
 import torch.nn.functional as F
 
-def _series_decomp_bcnt(x, kernel_size):
-    """
-    时间域分解（滑动平均）：对输入在“时间维”做平滑，得到 trend，seasonal = x - trend
-    输入 x 形状： [B, C, N, T]
-    返回 seasonal, trend （同形状）
-    """
-    B, C, N, T = x.shape
-    pad = (kernel_size - 1) // 2
-    # 变成 [B*C*N, 1, T] 便于用 AvgPool1d
-    x1 = x.permute(0, 1, 2, 3).contiguous().view(B * C * N, 1, T)
-    xpad = F.pad(x1, (pad, pad), mode='replicate')
-    trend = F.avg_pool1d(xpad, kernel_size=kernel_size, stride=1)
-    trend = trend.view(B, C, N, T)
-    seasonal = x - trend
-    return seasonal, trend
-
-def _graph_filter_on_input(btnc, A, alpha=0.5, mode='lowpass'):
-    """
-    图域滤波：在节点维度做一次邻接传播
-    输入 btnc： [B, T, N, C] （注意这一步在 transpose 前做，便于和 dataloader 形状对齐）
-    A: [N, N] 邻接（在本脚本中来自 supports[0]）
-    返回同形状
-    """
-    if A is None:
-        return btnc
-    B, T, N, C = btnc.shape
-    # 合并 (B, T, C) 作为batch，按节点维做乘法
-    X = btnc.permute(0, 1, 3, 2).contiguous().view(B * T * C, N)  # [BTC, N]
-    if mode == 'lowpass':
-        Xf = (X + alpha * (X @ A.t())) / (1.0 + alpha)
-    elif mode == 'highpass':
-        Xf = X - alpha * (X @ A.t())
-    else:
-        Xf = X
-    Xf = Xf.view(B, T, C, N).permute(0, 1, 3, 2).contiguous()  # 回到 [B, T, N, C]
-    return Xf
 # === NEW END ===
 
 parser = argparse.ArgumentParser()
@@ -378,19 +342,19 @@ def main_experiment():
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
             # x: numpy [B, T, N, C]
             # === NEW: 图域增强（输入前，沿节点维）===
-            if args.enhance in ['graph', 'both'] and (supports is not None) and (len(supports) > 0):
-                x_t = torch.Tensor(x).to(device)  # [B, T, N, C]
-                x_t = _graph_filter_on_input(x_t, supports[0], alpha=args.graph_alpha, mode=args.graph_mode)
-                x = x_t.detach().cpu().numpy()
+            # if args.enhance in ['graph', 'both'] and (supports is not None) and (len(supports) > 0):
+            #     x_t = torch.Tensor(x).to(device)  # [B, T, N, C]
+            #     x_t = _graph_filter_on_input(x_t, supports[0], alpha=args.graph_alpha, mode=args.graph_mode)
+            #     x = x_t.detach().cpu().numpy()
 
             trainx = torch.Tensor(x).to(device)          # [B, T, N, C]
             trainx = trainx.transpose(1, 3)              # -> [B, C, N, T]
 
             # === NEW: 时间域增强（在 time 维做平滑）===
-            if args.enhance in ['series', 'both']:
-                seasonal, trend = _series_decomp_bcnt(trainx, kernel_size=args.series_kernel)
-                # 这里默认用 seasonal + trend_scale*trend（可调），简单起见用1.0（等于原数据）。可改成只 seasonal。
-                trainx = seasonal + trend  # 等价原数据；要加强滤波可改成：trainx = seasonal + 0.5*trend
+            # if args.enhance in ['series', 'both']:
+            #     seasonal, trend = _series_decomp_bcnt(trainx, kernel_size=args.series_kernel)
+            #     # 这里默认用 seasonal + trend_scale*trend（可调），简单起见用1.0（等于原数据）。可改成只 seasonal。
+            #     trainx = seasonal + trend  # 等价原数据；要加强滤波可改成：trainx = seasonal + 0.5*trend
 
             trainy = torch.Tensor(y).to(device)
             trainy = trainy.transpose(1, 3)              # [B, C, N, T]
@@ -413,18 +377,18 @@ def main_experiment():
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
             # === NEW: 图域增强（验证）===
-            if args.enhance in ['graph', 'both'] and (supports is not None) and (len(supports) > 0):
-                x_t = torch.Tensor(x).to(device)
-                x_t = _graph_filter_on_input(x_t, supports[0], alpha=args.graph_alpha, mode=args.graph_mode)
-                x = x_t.detach().cpu().numpy()
+            # if args.enhance in ['graph', 'both'] and (supports is not None) and (len(supports) > 0):
+            #     x_t = torch.Tensor(x).to(device)
+            #     x_t = _graph_filter_on_input(x_t, supports[0], alpha=args.graph_alpha, mode=args.graph_mode)
+            #     x = x_t.detach().cpu().numpy()
 
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1, 3)  # [B, C, N, T]
 
             # === NEW: 时间域增强（验证）===
-            if args.enhance in ['series', 'both']:
-                seasonal, trend = _series_decomp_bcnt(testx, kernel_size=args.series_kernel)
-                testx = seasonal + trend
+            # if args.enhance in ['series', 'both']:
+            #     seasonal, trend = _series_decomp_bcnt(testx, kernel_size=args.series_kernel)
+            #     testx = seasonal + trend
 
             testy = torch.Tensor(y).to(device)
             testy = testy.transpose(1, 3)
@@ -450,7 +414,7 @@ def main_experiment():
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)),flush=True)
         torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss,2))+".pth")
-        
+        import pdb; pdb.set_trace()
         # === EARLY STOPPING ===
         if mvalid_loss < best_val - args.early_stop_min_delta:
             best_val = mvalid_loss
@@ -480,19 +444,19 @@ def main_experiment():
 
     for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
         try:
-            # === NEW: 图域增强（测试）===
-            if args.enhance in ['graph', 'both'] and (supports is not None) and (len(supports) > 0):
-                x_t = torch.Tensor(x).to(device)
-                x_t = _graph_filter_on_input(x_t, supports[0], alpha=args.graph_alpha, mode=args.graph_mode)
-                x = x_t.detach().cpu().numpy()
+            # # === NEW: 图域增强（测试）===
+            # if args.enhance in ['graph', 'both'] and (supports is not None) and (len(supports) > 0):
+            #     x_t = torch.Tensor(x).to(device)
+            #     x_t = _graph_filter_on_input(x_t, supports[0], alpha=args.graph_alpha, mode=args.graph_mode)
+            #     x = x_t.detach().cpu().numpy()
 
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1,3)  # [B, C, N, T]
 
             # === NEW: 时间域增强（测试）===
-            if args.enhance in ['series', 'both']:
-                seasonal, trend = _series_decomp_bcnt(testx, kernel_size=args.series_kernel)
-                testx = seasonal + trend
+            # if args.enhance in ['series', 'both']:
+            #     seasonal, trend = _series_decomp_bcnt(testx, kernel_size=args.series_kernel)
+            #     testx = seasonal + trend
 
             with torch.no_grad():
                 preds = engine.model(testx).transpose(1,3)
