@@ -1,0 +1,47 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal", 
+            "args": [
+                "--data",
+                "data/FRANCE", 
+                // --device cuda:0 --batch_size 128 --epochs 5 --seq_length 12 --pred_length 12 --learning_rate 0.002  --dropout 0.3 
+                // --nhid 64 --weight_decay 0.0001 --print_every 50 --gcn_bool --addaptadj --randomadj --adjtype doubletransition 
+                "--device",
+                "cuda:0",
+                "--batch_size",
+                "128",
+                "--epochs",
+                "5",
+                "--seq_length",
+                "12",
+                "--pred_length",
+                "12",
+                "--learning_rate",
+                "0.002",
+                "--dropout",
+                "0.3",  
+                "--nhid",
+                "64",
+                "--weight_decay",
+                "0.0001",
+                "--print_every",
+                "50",
+                "--gcn_bool",
+                "--addaptadj",
+                "--randomadj",
+                "--adjtype",
+                "doubletransition"  
+            ]
+        }
+    ]
+}
