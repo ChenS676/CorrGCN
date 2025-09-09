@@ -300,18 +300,6 @@ class PowerMixDual(nn.Module):
         adj_1 = self._build_adj1_from_A(A_base)
         adj_2 = self._build_adj2_from_r1(N, device)
         
-        # ---- 用法：替换你原来的可视化片段 ----
-        # 连续值（归一化到[0,1]）版本
-        # save_adj(adj_2, "adj_2.png") 
-        # save_adj(adj_1, "adj_1.png")
-
-        # 如需二值化（严格 0/1）
-        # save_adj_binary(adj_2, "adj_2_binary.png", thr=0.5, mode="absolute")
-        # save_adj_binary(adj_1, "adj_1_binary.png", thr=0.5, mode="absolute")
-        # 或者用分位数阈值：例如只保留 top 10% 的高权重边
-        # save_adj_binary(adj_2, "adj_2_top10p.png", thr=0.9, mode="percentile")
-        # save_adj_binary(adj_1, "adj_1_top10p.png", thr=0.9, mode="percentile")
-        
         inj = [self.k_convs[k](x) * self.gates[k] for k in range(self.K)]
 
         # 双图幂律递推
@@ -329,40 +317,6 @@ class PowerMixDual(nn.Module):
 
 
 
-# =========================
-# Graph WaveNet 主体
-# =========================
-
-# class gwnet(nn.Module):
-#     def __init__(self, device, num_nodes, dropout=0.3, supports=None, gcn_bool=True,
-#                  addaptadj=True, aptinit=None, in_dim=2, out_dim=12,
-#                  residual_channels=32, dilation_channels=32, skip_channels=256,
-#                  end_channels=512, kernel_size=2, blocks=4, layers=2):
-#         super(gwnet, self).__init__()
-#         self.dropout = dropout
-#         self.blocks = blocks
-#         self.layers = layers
-#         self.gcn_bool = gcn_bool
-#         self.addaptadj = addaptadj
-#         self.device = device
-
-        # 环境变量控制开关
-        # self.use_power = os.getenv("GWN_USE_POWER", "0") == "1"
-        # self.use_cheby = os.getenv("GWN_USE_CHEBY", "0") == "1"
-        # self.cheby_K = int(os.getenv("GWN_CHEBY_K", "3"))
-        # self.diag_mode = os.getenv("GWN_DIAG_MODE", "self_and_neighbor")
-
-        # # MixPropDual
-        # self.use_mixprop = os.getenv("GWN_USE_MIXPROP", "0") == "1"
-        # self.mixprop_K = int(os.getenv("GWN_MIXPROP_K", "3"))
-        # self.adj_droprate = float(os.getenv("GWN_ADJ_DROPOUT", "0.1"))
-        # self.adj_temperature = float(os.getenv("GWN_ADJ_TEMP", "1.0"))
-
-        # # PowerMixDual (NEW)
-        # self.use_powermix = os.getenv("GWN_USE_POWERMIX", "0") == "1"
-        # self.powermix_K = int(os.getenv("GWN_POWERMIX_K", "3"))
-        # self.powermix_droprate = float(os.getenv("GWN_POWERMIX_DROPOUT", "0.1"))
-        # self.powermix_temperature = float(os.getenv("GWN_POWERMIX_TEMP", "1.0"))
 
 class gwnet(nn.Module):
     def __init__(self,
