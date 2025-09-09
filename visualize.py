@@ -54,3 +54,34 @@ def save_adj_binary(x: torch.Tensor, path: str, thr: float = 0.5, mode: str = "a
     fig.savefig(path, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
+
+import torch
+import numpy as np
+epoch = 1
+adj1  = torch.load(f"pts_adj/adj1_{epoch}.pt", map_location="cpu")
+adj2  = torch.load(f"pts_adj/adj2_{epoch}.pt", map_location="cpu")
+
+
+def visual_adj(A_plot, path_name):
+    A_plot = A_plot.detach().float().cpu().numpy()
+    N = A_plot.shape[0]
+    # deg = adj1.sum(axis=1)  # out-degree (row-sum)
+    # order = np.argsort(-deg)  # descending
+    # A_plot = adj1[order][:, order]
+
+    # Figure size scales mildly with N (cap to keep files manageable)
+    w = min(12, 1.0 + 0.25 * N)
+    h = min(10, 1.0 + 0.25 * N)
+    plt.figure(figsize=(w, h))
+    im = plt.imshow(A_plot, aspect='equal', interpolation='nearest')
+    plt.colorbar(im, fraction=0.046, pad=0.04)
+    plt.title(f'Adjacency Heatmap {path_name[:-4]}(N={N})')
+    plt.xlabel('j')
+    plt.ylabel('i')
+    plt.tight_layout()
+    plt.savefig(path_name, dpi=300)
+    plt.close()
+
+
+visual_adj(adj1, f'adj1_{epoch}_nn.pdf')
+visual_adj(adj2, f'adj2_{epoch}_nn.pdf')

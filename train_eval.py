@@ -22,6 +22,8 @@ try:
     import wandb
 except ImportError:
     wandb = None
+import pdb
+from visualize import save_adj, save_adj_binary, to01, binarize01
 
 # ============================
 # CLI
@@ -31,10 +33,10 @@ parser.add_argument('--device', type=str, default='cuda:0', help='')
 parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
-parser.add_argument('--gcn_bool',action='store_true', help='whether to add graph convolution layer')
-parser.add_argument('--aptonly',action='store_true', help='whether only adaptive adj')
-parser.add_argument('--addaptadj',action='store_true', help='whether add adaptive adj')
-parser.add_argument('--randomadj',action='store_true', help='whether random initialize adaptive adj')
+parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
+parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
+parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
+parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=96, help='input sequence length')
 parser.add_argument('--pred_length', type=int, default=12, help='prediction length (output sequence length)')
 parser.add_argument('--nhid', type=int, default=32, help='')
@@ -48,7 +50,7 @@ parser.add_argument('--epochs', type=int, default=100, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
 parser.add_argument('--save', type=str, default='./garage/metr', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--run_multiple_experiments',action='store_true', help='run experiments with different sequence lengths')
+parser.add_argument('--run_multiple_experiments', action='store_true', help='run experiments with different sequence lengths')
 
 # === Early stopping ===
 parser.add_argument('--early_stop_patience', type=int, default=10,
@@ -342,7 +344,7 @@ def main_experiment():
 
     print("start training...", flush=True)
 
-    his_loss =[]
+    his_loss = []
     val_time = []
     train_time = []
 
@@ -403,7 +405,9 @@ def main_experiment():
             testy = testy.transpose(1, 3)
 
             metrics = engine.eval(testx, testy[:, 0, :, :args.pred_length])
-            valid_loss.append(metrics[0]); valid_mape.append(metrics[1]); valid_rmse.append(metrics[2])
+            valid_loss.append(metrics[0])
+            valid_mape.append(metrics[1])
+            valid_rmse.append(metrics[2])
         s2 = time.time()
         print(f"Epoch: {i:03d}, Inference Time: {s2-s1:.4f} secs")
         val_time.append(s2-s1)
@@ -421,7 +425,9 @@ def main_experiment():
                'Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch')
               .format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)),
               flush=True)
-
+        
+        torch.save(engine.model.powermix_convs[0].adj_1, f"adj1_{i}.pt") 
+        torch.save(engine.model.powermix_convs[0].adj_2, f"adj2_{i}.pt") 
         # W&B: per-epoch aggregate logging
         if WANDB_ON:
             lr = _get_lr_safe(engine)
@@ -445,7 +451,7 @@ def main_experiment():
                 if hasattr(engine, 'model') and hasattr(engine.model, 'power_coef'):
                     pc = engine.model.power_coef.detach().float().cpu().numpy()
                     for k, v in enumerate(pc):
-                        wandb.log({f'power_coef/k{k}': float(v), 'epoch': i}, step=global_step)
+                        wandb.log({f'power_coef/k{k}': float(v), 'epoch': i}, step = global_step)
             except Exception:
                 pass
 
@@ -471,28 +477,29 @@ def main_experiment():
 
         if epochs_no_improve >= args.early_stop_patience:
             print(f"Early stopping at epoch {i}. "
-                  f"Best valid loss: {best_val:.4f} (epoch {np.argmin(his_loss)+1}).")
+                  f"Best valid loss: {best_val:.4f} (epoch {np.argmin(his_loss) + 1}).")
             break
-        # === END EARLY STOPPING ===
-
+    
+        torch.save(engine.model.powermix_convs[0].adj_1, f"adj1_{i}.pt")
+        torch.save(engine.model.powermix_convs[0].adj_2, f"adj2_{i}.pt")
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
 
     # testing (use best checkpoint)
     bestid = int(np.argmin(his_loss))
-    best_ckpt = args.save+"_epoch_"+str(bestid+1)+"_"+str(round(his_loss[bestid],2))+".pth"
+    best_ckpt = args.save+"_epoch_"+str(bestid+1)+"_"+str(round(his_loss[bestid], 2))+".pth"
     engine.model.load_state_dict(torch.load(best_ckpt))
 
     outputs = []
     realy = torch.Tensor(dataloader['y_test']).to(device)
-    realy = realy.transpose(1,3)[:,0,:,:args.pred_length]
+    realy = realy.transpose(1, 3)[:, 0, :, :args.pred_length]
 
     for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
         try:
             testx = torch.Tensor(x).to(device)
-            testx = testx.transpose(1,3)  # [B, C, N, T]
+            testx = testx.transpose(1, 3)  # [B, C, N, T]
             with torch.no_grad():
-                preds = engine.model(testx).transpose(1,3)
+                preds = engine.model(testx).transpose(1, 3)
             if len(preds.shape) == 4:
                 preds = preds[:, 0, :, :]
             outputs.append(preds)
@@ -508,22 +515,27 @@ def main_experiment():
             else:
                 raise e
 
-    yhat = torch.cat(outputs,dim=0)
-    yhat = yhat[:realy.size(0),...]
+    yhat = torch.cat(outputs, dim=0)
+    yhat = yhat[:realy.size(0), ...]
 
     print("Training finished")
     print("The valid loss on best model is", str(round(his_loss[bestid],4)))
 
-    amae = []; amape = []; armse = []; horizon_results = []
+    amae = []
+    amape = []
+    armse = []
+    horizon_results = []
 
     for i in range(args.pred_length):
-        pred = scaler.inverse_transform(yhat[:,:,i])
-        real = realy[:,:,i]
-        metrics = util.metric(pred,real)
+        pred = scaler.inverse_transform(yhat[:, :, i])
+        real = realy[:, :, i]
+        metrics = util.metric(pred, real)
         print(f'Evaluate best model on test data for horizon {i+1:02d}, '
               f'Test MAE: {metrics[0]:.4f}, Test MAPE: {metrics[1]:.4f}, Test RMSE: {metrics[2]:.4f}')
 
-        amae.append(metrics[0]); amape.append(metrics[1]); armse.append(metrics[2])
+        amae.append(metrics[0])
+        amape.append(metrics[1])
+        armse.append(metrics[2])
         horizon_results.append({'horizon': i+1, 'mae': metrics[0], 'mape': metrics[1], 'rmse': metrics[2]})
 
         if WANDB_ON:

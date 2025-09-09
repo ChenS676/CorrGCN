@@ -161,7 +161,11 @@ class MixPropDual(nn.Module):
     双图递推（固定邻接+自适应邻接）。
     """
     def __init__(self, c_in, c_out, K=3, droprate=0.1, temperature=1.0,
-                 diag_mode='self_and_neighbor', r_dim=10, use_laplacian=False):
+                 diag_mode='self_and_neighbor', 
+                 r_dim=10, 
+                 emb_dim=16,
+                 use_laplacian=False,
+                 embed_init='xavier'):
         super().__init__()
         assert K >= 1
         self.K = K
@@ -174,7 +178,13 @@ class MixPropDual(nn.Module):
         self.k_convs = nn.ModuleList([nn.Conv2d(c_in, c_out, kernel_size=1) for _ in range(K)])
         self.gates = nn.Parameter(torch.ones(K), requires_grad=True)
 
-        self.r1 = nn.Parameter(torch.randn(1, r_dim), requires_grad=True)
+        # self.r1 = nn.Parameter(torch.randn(1, r_dim), requires_grad=True)
+        self.r1 = nn.Embedding(r_dim, emb_dim)
+        if embed_init == 'normal':
+            nn.init.normal_(self.r1.weight, mean=0.0, std=0.02)
+        else:
+            # 默认 xavier
+            nn.init.xavier_uniform_(self.r1.weight)
         self.adj_1 = None
         self.adj_2 = None
         
@@ -203,12 +213,43 @@ class MixPropDual(nn.Module):
             adj_1 = F.dropout(adj_1, p=self.droprate)
         return adj_1
 
-    def _build_adj2_from_r1(self, N, device):
-        r1 = self.r1
-        if r1.size(0) != N:
-            r1 = r1.expand(N, -1).contiguous()
-        S = r1 @ r1.t()
-        S = F.relu(S)
+    # def _build_adj2_from_r1(self, N, device):
+    #     r1 = self.r1
+    #     if r1.size(0) != N:
+    #         r1 = r1.expand(N, -1).contiguous()
+    #     S = r1 @ r1.t()
+    #     S = F.relu(S)
+    #     adj_2 = torch.softmax(S / max(self.temperature, 1e-6), dim=1)
+    #     adj_2 = self._apply_diag(adj_2, self.diag_mode)
+    #     if self.training and self.droprate > 0:
+    #         adj_2 = F.dropout(adj_2, p=self.droprate)
+    #     return adj_2
+
+    def _build_adj2_from_r1(self, N, device, node_idx: torch.Tensor = None):
+        """
+        用 Embedding 产生每个节点的向量并构造 adj_2
+        - N: 当前 batch/图的节点数
+        - device: 放置计算的设备
+        - node_idx: 可选，形如 [N] 的 LongTensor，指定节点的全局 ID 顺序。
+                    若为 None，则默认使用 [0..N-1]。
+        """
+        if node_idx is None:
+            idx = torch.arange(N, device=device, dtype=torch.long)
+        else:
+            idx = node_idx.to(device=device, dtype=torch.long)
+
+        # 取出节点嵌入 R: [N, r_dim]
+        R = self.r1(idx)
+
+        # 归一化后做相似度，避免范数差异导致“量纲”主导
+        if self.use_cosine:
+            R = F.normalize(R, p=2, dim=1)
+
+        # 相似度矩阵 S: [N, N]
+        S = R @ R.t()
+        S = F.relu(S)  # 保证非负，便于 softmax 温度控制
+
+        # 行 softmax + 对角处理 + 训练期 dropout
         adj_2 = torch.softmax(S / max(self.temperature, 1e-6), dim=1)
         adj_2 = self._apply_diag(adj_2, self.diag_mode)
         if self.training and self.droprate > 0:
@@ -264,7 +305,10 @@ class PowerMixDual(nn.Module):
         self.last_power_coef = None
 
         self.r1 = nn.Parameter(torch.randn(1, r_dim), requires_grad=True)
+        self.adj_1 = None
+        self.adj_2 = None
 
+        
     @staticmethod
     def _apply_diag(A, mode):
         if mode == 'neighbor':
@@ -297,8 +341,8 @@ class PowerMixDual(nn.Module):
         with torch.no_grad():
             self.last_power_coef = self.power_coef.detach().cpu()
 
-        adj_1 = self._build_adj1_from_A(A_base)
-        adj_2 = self._build_adj2_from_r1(N, device)
+        self.adj_1 = self._build_adj1_from_A(A_base)
+        self.adj_2 = self._build_adj2_from_r1(N, device)
         
         inj = [self.k_convs[k](x) * self.gates[k] for k in range(self.K)]
 
@@ -307,8 +351,8 @@ class PowerMixDual(nn.Module):
         z2 = z.clone()
         for k in range(1, self.K):
             coef = self.power_coef[k]
-            z = adj_1 @ z + coef * inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
-            z2 = adj_2 @ z2 + coef * inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
+            z = self.adj_1 @ z + coef * inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
+            z2 = self.adj_2 @ z2 + coef * inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
 
         z = z.view(B, T, N, -1).permute(0, 3, 2, 1).contiguous()
         z2 = z2.view(B, T, N, -1).permute(0, 3, 2, 1).contiguous()
