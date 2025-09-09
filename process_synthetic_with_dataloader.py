@@ -133,6 +133,24 @@ def generate_synthetic_data(
             pdf.savefig()
             plt.close()
 
+            plt.figure(figsize=(6, 5))
+            plt.imshow((matrix @ matrix), cmap='viridis', interpolation='nearest')
+            plt.title(f'Heatmap of K2 {key}')
+            plt.colorbar(label='Transition Probability')
+            plt.xlabel('To State')
+            plt.ylabel('From State')
+            pdf.savefig()
+            plt.close()
+
+            plt.figure(figsize=(6, 5))
+            plt.imshow((matrix @ matrix), cmap='viridis', interpolation='nearest')
+            plt.title(f'Heatmap of K3 {key}')
+            plt.colorbar(label='Transition Probability')
+            plt.xlabel('To State')
+            plt.ylabel('From State')
+            pdf.savefig()
+            plt.close()
+
     start_ts = max(0, T_length - 200)
     end_ts = T_length
     short_data = final_data[:, start_ts:end_ts]
@@ -155,7 +173,7 @@ def generate_synthetic_data(
         for key in data.files:
             matrix = data[key]
             plt.figure(figsize=(6, 5))
-            sns.heatmap(matrix, cmap='viridis')
+            sns.heatmap(matrix, cmap='coolwarm', vmin=matrix.min(), vmax=matrix.max())
             plt.title(f'Adjacency (Transition) Matrix - {key}')
             plt.xlabel('To State')
             plt.ylabel('From State')

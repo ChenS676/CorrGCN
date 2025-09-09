@@ -85,3 +85,72 @@ def visual_adj(A_plot, path_name):
 
 visual_adj(adj1, f'adj1_{epoch}_nn.pdf')
 visual_adj(adj2, f'adj2_{epoch}_nn.pdf')
+
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Data manually extracted from the LaTeX table (MAE only for brevity, RMSE similarly)
+data = {
+    ("Diffusion GCN", "Easy"): [0.1953, 0.2521, 0.3051, 0.3579],
+    ("Diffusion GCN", "Medium"): [0.2960, 0.3734, 0.4346, 0.5002],
+    ("Diffusion GCN", "Hard"): [0.3426, 0.4187, 0.4718, 0.5090],
+    ("Diffusion GCN", "Very Hard"): [0.4194, 0.4712, 0.4911, 0.5044],
+
+    ("Power-law Filters", "Easy"): [0.1917, 0.2477, 0.2984, 0.3514],
+    ("Power-law Filters", "Medium"): [0.2907, 0.3703, 0.4270, 0.4904],
+    ("Power-law Filters", "Hard"): [0.3364, 0.4162, 0.4633, 0.4977],
+    ("Power-law Filters", "Very Hard"): [0.4098, 0.4637, 0.4821, 0.4928],
+
+    ("Dual-Graph Prop", "Easy"): [0.1932, 0.2491, 0.3000, 0.3518],
+    ("Dual-Graph Prop", "Medium"): [0.2922, 0.3689, 0.4288, 0.4890],
+    ("Dual-Graph Prop", "Hard"): [0.3382, 0.4140, 0.4671, 0.5031],
+    ("Dual-Graph Prop", "Very Hard"): [0.4135, 0.4652, 0.4859, 0.4967],
+
+    ("Chebyshev Conv", "Easy"): [0.1940, 0.2508, 0.3021, 0.3531],
+    ("Chebyshev Conv", "Medium"): [0.2945, 0.3716, 0.4302, 0.4927],
+    ("Chebyshev Conv", "Hard"): [0.3404, 0.4176, 0.4698, 0.5063],
+    ("Chebyshev Conv", "Very Hard"): [0.4160, 0.4683, 0.4881, 0.4989],
+
+    ("PowerMixDual", "Easy"): [0.1901, 0.2464, 0.2970, 0.3500],
+    ("PowerMixDual", "Medium"): [0.2892, 0.3687, 0.4253, 0.4879],
+    ("PowerMixDual", "Hard"): [0.3351, 0.4147, 0.4612, 0.4957],
+    ("PowerMixDual", "Very Hard"): [0.4083, 0.4619, 0.4800, 0.4906],
+}
+
+
+
+horizons = [6]
+difficulties = ["Easy", "Medium", "Hard", "Very Hard"]
+methods = ["Diffusion GCN", "Power-law Filters", "Dual-Graph Prop", "Chebyshev Conv", "PowerMixDual"]
+
+# Plot: one subplot for each horizon
+fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharey=True)
+axes = axes.flatten()
+
+x = np.arange(len(difficulties))  # [0,1,2,3]
+linestyles = ["-", "--", "-.", ":"]  # one style per horizon
+
+plt.figure(figsize=(10, 6))
+
+for m_idx, method in enumerate(methods):
+    for h_idx, h in enumerate(horizons):
+        values = [data[(method, d)][h_idx] for d in difficulties]
+        plt.plot(
+            x, values, 
+            marker="o", 
+            linestyle=linestyles[h_idx], 
+            label=f"{method} (H{h})"
+        )
+
+plt.xticks(x, difficulties)
+plt.ylabel("MAE")
+plt.xlabel("Difficulty Level")
+plt.title("Synthetic Dataset: MAE across Difficulty Levels and Horizons")
+plt.grid(True)
+plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")  # place legend outside
+plt.tight_layout()
+
+# Save & show
+plt.savefig("synthetic_performance.pdf", dpi=300, bbox_inches="tight")
+plt.show()

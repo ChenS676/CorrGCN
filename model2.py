@@ -180,14 +180,24 @@ class MixPropDual(nn.Module):
         self.gates = nn.Parameter(torch.ones(K), requires_grad=True)
 
         # self.r1 = nn.Parameter(torch.randn(1, r_dim), requires_grad=True)
-        self.r1 = nn.Embedding(r_dim, emb_dim) ###
-        if embed_init == 'normal': ###
-            nn.init.normal_(self.r1.weight, mean=0.0, std=0.02) ###
-        else: ###
-            # 默认 xavier ###
-            nn.init.xavier_uniform_(self.r1.weight) ###
+        ###--------------------------------------------------------------------------------------###
+        # self.r1 = nn.Embedding(r_dim, emb_dim) ###
+        # if embed_init == 'normal': ###
+        #     nn.init.normal_(self.r1.weight, mean=0.0, std=0.02) ###
+        # else: ###
+        #     # 默认 xavier ###
+        #     nn.init.xavier_uniform_(self.r1.weight) ###
+        ###--------------------------------------------------------------------------------------###
+        self.src_emb = nn.Embedding(r_dim, emb_dim)
+        self.dst_emb = nn.Embedding(r_dim, emb_dim)
 
-        ###-------------------------------------------###
+        if embed_init == 'normal':
+            nn.init.normal_(self.src_emb.weight, mean=0.0, std=0.02)
+            nn.init.normal_(self.dst_emb.weight, mean=0.0, std=0.02)
+        else:
+            nn.init.xavier_uniform_(self.src_emb.weight)
+            nn.init.xavier_uniform_(self.dst_emb.weight)
+        ###--------------------------------------------------------------------------------------###
         self.adj_1 = None
         self.adj_2 = None
         
@@ -242,14 +252,22 @@ class MixPropDual(nn.Module):
             idx = node_idx.to(device=device, dtype=torch.long)
 
         # 取出节点嵌入 R: [N, r_dim]
-        R = self.r1(idx)
+        ###--------------------------------------------------------------------------------------###
+        # R = self.r1(idx)
+        
+        # # 归一化后做相似度，避免范数差异导致“量纲”主导
+        # if self.use_cosine:
+        #     R = F.normalize(R, p=2, dim=1)
 
-        # 归一化后做相似度，避免范数差异导致“量纲”主导
-        if self.use_cosine:
-            R = F.normalize(R, p=2, dim=1)
+        # # 相似度矩阵 S: [N, N]
+        # S = R @ R.t()
+        ###--------------------------------------------------------------------------------------###
+        U = self.src_emb(idx)   # [N, emb_dim]
+        V = self.dst_emb(idx)   # [N, emb_dim]
 
         # 相似度矩阵 S: [N, N]
-        S = R @ R.t()
+        S = U @ V.t()
+        ###--------------------------------------------------------------------------------------###
         S = F.relu(S)  # 保证非负，便于 softmax 温度控制
 
         # 行 softmax + 对角处理 + 训练期 dropout
@@ -307,14 +325,24 @@ class PowerMixDual(nn.Module):
         self.power_coef = nn.Parameter(torch.ones(K), requires_grad=True)
         self.last_power_coef = None
 
-        self.r1 = nn.Embedding(r_dim, emb_dim)
-        nn.init.xavier_uniform_(self.r1.weight)
+        ###--------------------------------------------------------------------------------------###
+        # self.r1 = nn.Embedding(r_dim, emb_dim)
+        # if embed_init == 'normal':
+        #     nn.init.normal_(self.r1.weight, mean=0.0, std=0.02)
+        # else:
+        #     # 默认 xavier
+        #     nn.init.xavier_uniform_(self.r1.weight)
+        ###--------------------------------------------------------------------------------------###
+        self.src_emb = nn.Embedding(r_dim, emb_dim)
+        self.dst_emb = nn.Embedding(r_dim, emb_dim)
 
         if embed_init == 'normal':
-            nn.init.normal_(self.r1.weight, mean=0.0, std=0.02)
+            nn.init.normal_(self.src_emb.weight, mean=0.0, std=0.02)
+            nn.init.normal_(self.dst_emb.weight, mean=0.0, std=0.02)
         else:
-            # 默认 xavier
-            nn.init.xavier_uniform_(self.r1.weight)
+            nn.init.xavier_uniform_(self.src_emb.weight)
+            nn.init.xavier_uniform_(self.dst_emb.weight)
+        ###--------------------------------------------------------------------------------------###
         self.adj_1 = None
         self.adj_2 = None
 
@@ -339,10 +367,11 @@ class PowerMixDual(nn.Module):
         return self._build_adj_softmax(A)
 
     def _build_adj2_from_r1(self, N, device):
-        r1 = self.r1.weight
-        if r1.size(0) != N:
-            r1 = r1.expand(N, -1).contiguous()
-        S = r1 @ r1.t()
+        ###--------------------------------------------------------------------------------------###
+        U = self.src_emb(torch.arange(N, device=device))
+        V = self.dst_emb(torch.arange(N, device=device))
+        S = U @ V.t()
+        ###--------------------------------------------------------------------------------------###
         return self._build_adj_softmax(S)
 
     def forward(self, x, A_base):
@@ -361,7 +390,6 @@ class PowerMixDual(nn.Module):
         z2 = z.clone()
         for k in range(1, self.K):
             coef = self.power_coef[k]
-            import pdb; pdb.set_trace()
             z = self.adj_1 @ z + coef * inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
             z2 = self.adj_2 @ z2 + coef * inj[k].permute(0, 3, 2, 1).contiguous().view(B * T, N, -1)
 
