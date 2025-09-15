@@ -1,6 +1,6 @@
 
 import torch.optim as optim
-from model import gwnet
+from model2 import gwnet  ######
 import util
 import torch
 import torch.nn as nn
@@ -56,31 +56,49 @@ class trainer():
     def train(self, input, real_val):
         self.model.train()
         self.optimizer.zero_grad()
-        input = nn.functional.pad(input,(1,0,0,0))
+
+        input = nn.functional.pad(input, (1, 0, 0, 0))
         output = self.model(input)
-        output = output.transpose(1,3)
-        #output = [batch_size,12,num_nodes,1]
-        real = torch.unsqueeze(real_val,dim=1)
+        output = output.transpose(1, 3)
+        # output: [batch_size, 12, num_nodes, 1]
+
+        real = torch.unsqueeze(real_val, dim=1)
         predict = self.scaler.inverse_transform(output)
 
+        # optimize
         loss = self.loss(predict, real, 0.0)
         loss.backward()
         if self.clip is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
         self.optimizer.step()
-        mape = util.masked_mape(predict,real,0.0).item()
-        rmse = util.masked_rmse(predict,real,0.0).item()
-        return loss.item(),mape,rmse
+
+        # metrics (no grad)
+        with torch.no_grad():
+            mape = util.masked_mape(predict, real, 0.0).item()
+            mae  = util.masked_mae(predict,  real, 0.0).item()
+            rmse = util.masked_rmse(predict, real, 0.0).item()
+            rse  = util.masked_rse(predict,  real).item()
+            corr = util.masked_corr(predict, real).item()
+
+        return loss.item(), mape, mae, rmse, rse, corr
 
     def eval(self, input, real_val):
         self.model.eval()
-        input = nn.functional.pad(input,(1,0,0,0))
+        input = nn.functional.pad(input, (1, 0, 0, 0))
         output = self.model(input)
-        output = output.transpose(1,3)
-        #output = [batch_size,12,num_nodes,1]
-        real = torch.unsqueeze(real_val,dim=1)
+        output = output.transpose(1, 3)
+        # output = [batch_size, 12, num_nodes, 1]
+        real = torch.unsqueeze(real_val, dim=1)
         predict = self.scaler.inverse_transform(output)
+
+        # basic loss
         loss = self.loss(predict, real, 0.0)
-        mape = util.masked_mape(predict,real,0.0).item()
-        rmse = util.masked_rmse(predict,real,0.0).item()
-        return loss.item(),mape,rmse
+
+        # metrics
+        mape = util.masked_mape(predict, real, 0.0).item()
+        mae = util.masked_mae(predict, real, 0.0).item()
+        rmse = util.masked_rmse(predict, real, 0.0).item()
+        rse = util.masked_rse(predict, real).item()
+        corr = util.masked_corr(predict, real).item()
+
+        return loss.item(), mape, mae, rmse, rse, corr

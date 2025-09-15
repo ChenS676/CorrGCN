@@ -1,9 +1,6 @@
 # train.py
 # -*- coding: utf-8 -*-
-# python train_eval.py --data data/FRANCE --device cuda:0 --batch_size 64 --epochs 5 --seq_length 96 --pred_length 12 --learning_rate 0.0005 --dropout 0 --nhid 64 --weight_decay 0.0001 --print_every 50 --gcn_bool --addaptadj --randomadj --adjtype doubletransition --diag_mode neighbor  --use_powermix --powermix_k 2 --powermix_dropout 0 --powermix_temp 1.0 --power_order 2 --power_init decay 
-# --wandb --wandb_project powermix-traffic --wandb_mode online --wandb_tags "france,powermix,k2"
-# python train_eval.py --data data/COVID19_CA55 --device cuda:0 --batch_size 1 --epochs 5 --seq_length 12 --pred_length 12 --learning_rate 0.0005 --dropout 0 --nhid 64 --weight_decay 0.0001 --print_every 50 --gcn_bool --addaptadj --randomadj --adjtype doubletransition --diag_mode neighbor  --use_powermix --powermix_k 2 --powermix_dropout 0 --powermix_temp 1.0 --power_order 2 --power_init decay 
-# COVID19_CA55 / ELECTRICITY ###### --wandb --wandb_project powermix-traffic --wandb_mode online --wandb_tags "france,powermix,k2"
+# python train2.py --data data/FRANCE --device cuda:0 --batch_size 64 --epochs 5 --seq_length 96 --pred_length 12 --learning_rate 0.0005 --dropout 0 --nhid 64 --weight_decay 0.0001 --print_every 50 --gcn_bool --addaptadj --randomadj --adjtype doubletransition --diag_mode neighbor  --use_powermix --powermix_k 2 --powermix_dropout 0 --powermix_temp 1.0 --power_order 2 --power_init decay 
 
 
 import os
@@ -187,14 +184,6 @@ def configure_dataset_params(args):
         args.save = './garage/electricity/'
         print("检测到Electricity数据集")
         print(f"配置参数: 节点数={args.num_nodes}, 邻接矩阵={args.adjdata}")
-        
-    elif 'COVID19_CA55' in data_path:
-        args.num_nodes = 55
-        args.adjdata = 'data/sensor_graph/adj_mx_covid19_CA55.pkl'
-        args.save = './garage/covid19/'
-        print("检测到Covid19-CA55数据集")
-        print(f"配置参数: 节点数={args.num_nodes}, 邻接矩阵={args.adjdata}")
-
 
     else:
         print(f"未识别的数据集: {data_path}")
@@ -365,9 +354,8 @@ def main_experiment():
     global_step = 0  # for iter-level logging
 
     for i in range(1, args.epochs+1):
-        train_loss = []
-        train_mape = []
-        train_rmse = []
+        # ----- TRAIN -----
+        train_loss, train_mape, train_mae, train_rmse, train_rse, train_corr = [], [], [], [], [], []
         t1 = time.time()
         dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
@@ -376,11 +364,15 @@ def main_experiment():
             trainy = torch.Tensor(y).to(device)
             trainy = trainy.transpose(1, 3)              # [B, C, N, T]
 
+            # metrics: (loss, mape, mae, rmse, rse, corr)
             metrics = engine.train(trainx, trainy[:, 0, :, :args.pred_length])
 
             train_loss.append(metrics[0])
             train_mape.append(metrics[1])
-            train_rmse.append(metrics[2])
+            train_mae.append(metrics[2])
+            train_rmse.append(metrics[3])
+            train_rse.append(metrics[4])
+            train_corr.append(metrics[5])
 
             # Per-iter W&B logging when print_every triggers
             if WANDB_ON and (iter % args.print_every == 0):
@@ -388,7 +380,10 @@ def main_experiment():
                 payload = {
                     'iter/train_loss': metrics[0],
                     'iter/train_mape': metrics[1],
-                    'iter/train_rmse': metrics[2],
+                    'iter/train_mae':  metrics[2],
+                    'iter/train_rmse': metrics[3],
+                    'iter/train_rse':  metrics[4],
+                    'iter/train_corr': metrics[5],
                     'iter/epoch': i,
                     'iter/step_in_epoch': iter
                 }
@@ -398,16 +393,22 @@ def main_experiment():
             global_step += 1
 
             if iter % args.print_every == 0:
-                print(f"Iter: {iter:03d}, Train Loss: {train_loss[-1]:.4f}, "
-                      f"Train MAPE: {train_mape[-1]:.4f}, Train RMSE: {train_rmse[-1]:.4f}", flush=True)
+                print(
+                    f"Iter: {iter:03d}, "
+                    f"Train Loss: {train_loss[-1]:.4f}, "
+                    f"Train MAPE: {train_mape[-1]:.4f}, "
+                    f"Train MAE: {train_mae[-1]:.4f}, "
+                    f"Train RMSE: {train_rmse[-1]:.4f}, "
+                    f"Train RSE: {train_rse[-1]:.4f}, "
+                    f"Train CORR: {train_corr[-1]:.4f}",
+                    flush=True
+                )
 
         t2 = time.time()
-        train_time.append(t2-t1)
+        train_time.append(t2 - t1)
 
-        # validation
-        valid_loss = []
-        valid_mape = []
-        valid_rmse = []
+        # ----- VALID -----
+        valid_loss, valid_mape, valid_mae, valid_rmse, valid_rse, valid_corr = [], [], [], [], [], []
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
             testx = torch.Tensor(x).to(device)
@@ -415,41 +416,64 @@ def main_experiment():
             testy = torch.Tensor(y).to(device)
             testy = testy.transpose(1, 3)
 
+            # metrics: (loss, mape, mae, rmse, rse, corr)
             metrics = engine.eval(testx, testy[:, 0, :, :args.pred_length])
             valid_loss.append(metrics[0])
             valid_mape.append(metrics[1])
-            valid_rmse.append(metrics[2])
+            valid_mae.append(metrics[2])
+            valid_rmse.append(metrics[3])
+            valid_rse.append(metrics[4])
+            valid_corr.append(metrics[5])
+
         s2 = time.time()
-        print(f"Epoch: {i:03d}, Inference Time: {s2-s1:.4f} secs")
-        val_time.append(s2-s1)
+        print(f"Epoch: {i:03d}, Inference Time: {s2 - s1:.4f} secs")
+        val_time.append(s2 - s1)
 
-        mtrain_loss = np.mean(train_loss)
-        mtrain_mape = np.mean(train_mape)
-        mtrain_rmse = np.mean(train_rmse)
+        # ----- EPOCH AGGREGATES -----
+        mtrain_loss = float(np.mean(train_loss))
+        mtrain_mape = float(np.mean(train_mape))
+        mtrain_mae  = float(np.mean(train_mae))
+        mtrain_rmse = float(np.mean(train_rmse))
+        mtrain_rse  = float(np.mean(train_rse))
+        mtrain_corr = float(np.mean(train_corr))
 
-        mvalid_loss = np.mean(valid_loss)
-        mvalid_mape = np.mean(valid_mape)
-        mvalid_rmse = np.mean(valid_rmse)
+        mvalid_loss = float(np.mean(valid_loss))
+        mvalid_mape = float(np.mean(valid_mape))
+        mvalid_mae  = float(np.mean(valid_mae))
+        mvalid_rmse = float(np.mean(valid_rmse))
+        mvalid_rse  = float(np.mean(valid_rse))
+        mvalid_corr = float(np.mean(valid_corr))
         his_loss.append(mvalid_loss)
 
-        print(('Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, '
-               'Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch')
-              .format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)),
-              flush=True)
-        
-        torch.save(engine.model.powermix_convs[0].adj_1, f"adj1_{i}.pt") 
-        torch.save(engine.model.powermix_convs[0].adj_2, f"adj2_{i}.pt") 
-        # W&B: per-epoch aggregate logging
+        print((
+            'Epoch: {:03d}, '
+            'Train Loss: {:.4f}, Train MAPE: {:.4f}, Train MAE: {:.4f}, Train RMSE: {:.4f}, Train RSE: {:.4f}, Train CORR: {:.4f}, '
+            'Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid MAE: {:.4f}, Valid RMSE: {:.4f}, Valid RSE: {:.4f}, Valid CORR: {:.4f}, '
+            'Training Time: {:.4f}/epoch'
+        ).format(
+            i,
+            mtrain_loss, mtrain_mape, mtrain_mae, mtrain_rmse, mtrain_rse, mtrain_corr,
+            mvalid_loss, mvalid_mape, mvalid_mae, mvalid_rmse, mvalid_rse, mvalid_corr,
+            (t2 - t1)
+        ), flush=True)
+
+        # ----- W&B per-epoch logging -----
         if WANDB_ON:
             lr = _get_lr_safe(engine)
             payload = {
                 'epoch': i,
                 'train/loss': mtrain_loss,
                 'train/mape': mtrain_mape,
+                'train/mae':  mtrain_mae,
                 'train/rmse': mtrain_rmse,
+                'train/rse':  mtrain_rse,
+                'train/corr': mtrain_corr,
                 'valid/loss': mvalid_loss,
                 'valid/mape': mvalid_mape,
+                'valid/mae':  mvalid_mae,
                 'valid/rmse': mvalid_rmse,
+                'valid/rse':  mvalid_rse,
+                'valid/corr': mvalid_corr,
                 'time/train_epoch_sec': (t2 - t1),
                 'time/valid_epoch_sec': (s2 - s1)
             }
@@ -462,15 +486,14 @@ def main_experiment():
                 if hasattr(engine, 'model') and hasattr(engine.model, 'power_coef'):
                     pc = engine.model.power_coef.detach().float().cpu().numpy()
                     for k, v in enumerate(pc):
-                        wandb.log({f'power_coef/k{k}': float(v), 'epoch': i}, step = global_step)
+                        wandb.log({f'power_coef/k{k}': float(v), 'epoch': i}, step=global_step)
             except Exception:
                 pass
 
-        # save checkpoint
+        # ----- CHECKPOINT -----
         ckpt_path = args.save+"_epoch_"+str(i) + "_" + str(round(mvalid_loss, 2))+".pth"
         torch.save(engine.model.state_dict(), ckpt_path)
 
-        # W&B: save checkpoint as artifact (optional)
         if WANDB_ON:
             try:
                 art = wandb.Artifact(f'ckpt_exp{args.expid}', type='model')
@@ -479,7 +502,7 @@ def main_experiment():
             except Exception:
                 pass
 
-        # === EARLY STOPPING ===
+        # ----- EARLY STOP -----
         if mvalid_loss < best_val - args.early_stop_min_delta:
             best_val = mvalid_loss
             epochs_no_improve = 0
@@ -488,15 +511,17 @@ def main_experiment():
 
         if epochs_no_improve >= args.early_stop_patience:
             print(f"Early stopping at epoch {i}. "
-                  f"Best valid loss: {best_val:.4f} (epoch {np.argmin(his_loss) + 1}).")
+                f"Best valid loss: {best_val:.4f} (epoch {np.argmin(his_loss) + 1}).")
             break
-    
+
+        # (optional) save learned adjs
         torch.save(engine.model.powermix_convs[0].adj_1, f"adj1_{i}.pt")
         torch.save(engine.model.powermix_convs[0].adj_2, f"adj2_{i}.pt")
+
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
 
-    # testing (use best checkpoint)
+    # ===== TESTING (use best checkpoint) =====
     bestid = int(np.argmin(his_loss))
     best_ckpt = args.save+"_epoch_"+str(bestid+1)+"_"+str(round(his_loss[bestid], 2))+".pth"
     engine.model.load_state_dict(torch.load(best_ckpt))
@@ -530,50 +555,73 @@ def main_experiment():
     yhat = yhat[:realy.size(0), ...]
 
     print("Training finished")
-    print("The valid loss on best model is", str(round(his_loss[bestid],4)))
+    print("The valid loss on best model is", str(round(his_loss[bestid], 4)))
 
-    amae = []
-    amape = []
-    armse = []
+    amae, amape, armse, arse, acorr = [], [], [], [], []
     horizon_results = []
 
     for i in range(args.pred_length):
         pred = scaler.inverse_transform(yhat[:, :, i])
         real = realy[:, :, i]
+        # util.metric: (mae, mape, rmse, rse, corr)
         metrics = util.metric(pred, real)
-        print(f'Evaluate best model on test data for horizon {i+1:02d}, '
-              f'Test MAE: {metrics[0]:.4f}, Test MAPE: {metrics[1]:.4f}, Test RMSE: {metrics[2]:.4f}')
+        print(
+            f'Evaluate best model on test data for horizon {i+1:02d}, '
+            f'Test MAE: {metrics[0]:.4f}, Test MAPE: {metrics[1]:.4f}, '
+            f'Test RMSE: {metrics[2]:.4f}, Test RSE: {metrics[3]:.4f}, Test CORR: {metrics[4]:.4f}'
+        )
 
         amae.append(metrics[0])
         amape.append(metrics[1])
         armse.append(metrics[2])
-        horizon_results.append({'horizon': i+1, 'mae': metrics[0], 'mape': metrics[1], 'rmse': metrics[2]})
+        arse.append(metrics[3])
+        acorr.append(metrics[4])
+        horizon_results.append({
+            'horizon': i+1,
+            'mae':  metrics[0],
+            'mape': metrics[1],
+            'rmse': metrics[2],
+            'rse':  metrics[3],
+            'corr': metrics[4],
+        })
 
         if WANDB_ON:
             wandb.log({
-                f'test/h{i+1}/mae': metrics[0],
+                f'test/h{i+1}/mae':  metrics[0],
                 f'test/h{i+1}/mape': metrics[1],
                 f'test/h{i+1}/rmse': metrics[2],
+                f'test/h{i+1}/rse':  metrics[3],
+                f'test/h{i+1}/corr': metrics[4],
             })
 
-    avg_mae = float(np.mean(amae))
+    avg_mae  = float(np.mean(amae))
     avg_mape = float(np.mean(amape))
     avg_rmse = float(np.mean(armse))
+    avg_rse  = float(np.mean(arse))
+    avg_corr = float(np.mean(acorr))
 
-    print(f'On average over {args.pred_length:d} horizons, '
-          f'Test MAE: {avg_mae:.4f}, Test MAPE: {avg_mape:.4f}, Test RMSE: {avg_rmse:.4f}')
+    print(
+        f'On average over {args.pred_length:d} horizons, '
+        f'Test MAE: {avg_mae:.4f}, Test MAPE: {avg_mape:.4f}, '
+        f'Test RMSE: {avg_rmse:.4f}, Test RSE: {avg_rse:.4f}, Test CORR: {avg_corr:.4f}'
+    )
 
     if WANDB_ON:
         wandb.summary['best/valid_loss'] = float(his_loss[bestid])
         wandb.summary['test/mae_avg'] = avg_mae
         wandb.summary['test/mape_avg'] = avg_mape
         wandb.summary['test/rmse_avg'] = avg_rmse
+        wandb.summary['test/rse_avg']  = avg_rse
+        wandb.summary['test/corr_avg'] = avg_corr
         wandb.summary['train/time_sec_per_epoch_avg'] = float(np.mean(train_time))
         wandb.summary['valid/time_sec_avg'] = float(np.mean(val_time))
         wandb.save(best_ckpt)
 
     # also store best to a deterministic name
-    torch.save(engine.model.state_dict(), args.save+"_exp"+str(args.expid)+"_best_"+str(round(his_loss[bestid],2))+".pth")
+    torch.save(
+        engine.model.state_dict(),
+        args.save+"_exp"+str(args.expid)+"_best_"+str(round(his_loss[bestid], 2))+".pth"
+    )
 
     return {
         'valid_loss_best': his_loss[bestid],
@@ -582,6 +630,8 @@ def main_experiment():
         'test_mae_avg': avg_mae,
         'test_mape_avg': avg_mape,
         'test_rmse_avg': avg_rmse,
+        'test_rse_avg': avg_rse,
+        'test_corr_avg': avg_corr,
         'horizon_results': horizon_results
     }
 

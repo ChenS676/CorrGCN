@@ -280,10 +280,13 @@ class MixPropDual(nn.Module):
     def forward(self, x, A_base):
         B, C, N, T = x.shape
         device = x.device
-
-        self.adj_1 = self._build_adj1_from_A(A_base)
-        self.adj_2 = self._build_adj2_from_r1(N, device)
-
+        ###--------------------------------------------------------------------------------------###
+        # self.adj_1 = self._build_adj1_from_A(A_base)
+        # self.adj_2 = self._build_adj2_from_r1(N, device)
+        ###--------------------------------------------------------------------------------------###
+        self.adj_1 = self._build_adj1_from_A(A_base).detach()
+        self.adj_2 = self._build_adj2_from_r1(N, device).detach()
+        ###--------------------------------------------------------------------------------------###
         inj = [self.k_convs[k](x) * self.gates[k] for k in range(self.K)]
 
         # 路一
@@ -380,9 +383,13 @@ class PowerMixDual(nn.Module):
         # with torch.no_grad():
         #     self.last_power_coef = self.power_coef.detach().cpu()
 
-        self.adj_1 = self._build_adj1_from_A(A_base)
-        self.adj_2 = self._build_adj2_from_r1(N, device)
-        
+        ###--------------------------------------------------------------------------------------###
+        # self.adj_1 = self._build_adj1_from_A(A_base)
+        # self.adj_2 = self._build_adj2_from_r1(N, device)
+        ###--------------------------------------------------------------------------------------###
+        self.adj_1 = self._build_adj1_from_A(A_base).detach()
+        self.adj_2 = self._build_adj2_from_r1(N, device).detach()
+        ###--------------------------------------------------------------------------------------###
         inj = [self.k_convs[k](x) * self.gates[k] for k in range(self.K)]
 
         # 双图幂律递推

@@ -202,10 +202,73 @@ def masked_mape(preds, labels, null_val=np.nan):
     return torch.mean(loss)
 
 
-def metric(pred, real):
-    mae = masked_mae(pred,real,0.0).item()
-    mape = masked_mape(pred,real,0.0).item()
-    rmse = masked_rmse(pred,real,0.0).item()
-    return mae,mape,rmse
+def masked_rse(preds, labels, null_val=np.nan, eps=1e-12):
+    """
+    Relative Squared Error:
+      sqrt(sum((ŷ - y)^2)) / sqrt(sum((y - ȳ)^2))
+    computed over masked entries.
+    """
+    if np.isnan(null_val):
+        mask = ~torch.isnan(labels)
+    else:
+        mask = (labels != null_val)
+    mask = mask.float()
+    # use the mask (not normalized) as weights to compute sums
+    masked_labels = labels * mask
+    count = torch.sum(mask)
 
+    # If nothing is valid, return 0
+    if count.item() == 0:
+        return torch.tensor(0.0, device=labels.device)
+
+    mean_label = torch.sum(masked_labels) / (count + eps)
+
+    se_num = torch.sum(((preds - labels) ** 2) * mask)
+    se_den = torch.sum(((labels - mean_label) ** 2) * mask)
+
+    return torch.sqrt(se_num / (se_den + eps))
+
+
+def masked_corr(preds, labels, null_val=np.nan, eps=1e-12):
+    """
+    Pearson correlation over masked entries.
+    """
+    if np.isnan(null_val):
+        mask = ~torch.isnan(labels)
+    else:
+        mask = (labels != null_val)
+    mask = mask.float()
+
+    # Flatten to 1D for stability; keep device/dtype
+    p = preds.reshape(-1)
+    y = labels.reshape(-1)
+    m = mask.reshape(-1)
+
+    wsum = torch.sum(m)
+    if wsum.item() == 0:
+        return torch.tensor(0.0, device=labels.device)
+
+    p_mean = torch.sum(p * m) / (wsum + eps)
+    y_mean = torch.sum(y * m) / (wsum + eps)
+
+    p_center = (p - p_mean)
+    y_center = (y - y_mean)
+
+    cov = torch.sum(p_center * y_center * m)
+    p_var = torch.sum((p_center ** 2) * m)
+    y_var = torch.sum((y_center ** 2) * m)
+
+    denom = torch.sqrt(p_var) * torch.sqrt(y_var) + eps
+    r = cov / denom
+    # Clamp to [-1, 1] to avoid tiny numeric spillover
+    return torch.clamp(r, -1.0, 1.0)
+
+
+def metric(pred, real):
+    mae = masked_mae(pred, real, 0.0).item()
+    mape = masked_mape(pred, real, 0.0).item()
+    rmse = masked_rmse(pred, real, 0.0).item()
+    rse = masked_rse(pred, real, 0.0).item()
+    corr = masked_corr(pred, real, 0.0).item()
+    return mae, mape, rmse, rse, corr
 
